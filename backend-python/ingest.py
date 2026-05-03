@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import feedparser
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
@@ -18,9 +19,9 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
 try:
     neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
     neo4j_driver.verify_connectivity()
-    print("✅ Connected to Neo4j")
+    print("Connected to Neo4j")
 except Exception as e:
-    print(f"❌ Failed to connect to Neo4j: {e}")
+    print(f"Failed to connect to Neo4j: {e}")
     exit(1)
 
 genai_client = genai.Client() # Uses GEMINI_API_KEY from .env
@@ -58,7 +59,7 @@ def extract_threat_intel(text: str) -> ThreatGraphData:
     """
     
     response = genai_client.models.generate_content(
-        model='gemini-2.5-pro',
+        model='gemini-2.5-flash',
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -85,7 +86,7 @@ def insert_into_neo4j(graph_data: ThreatGraphData):
             
         # Second pass: Create relationships
         for rel in graph_data.relationships:
-            relation = ''.join(e for e in rel.relation if e.isalnum().upper())
+            relation = ''.join(e for e in rel.relation if e.isalnum()).upper()
             if relation not in ["USES", "EXPLOITS", "TARGETS", "AFFECTS"]:
                 continue
                 
@@ -100,26 +101,28 @@ def insert_into_neo4j(graph_data: ThreatGraphData):
             )
 
 def main():
-    print("🚀 Starting Threat Intel Ingestion Pipeline")
+    print("Starting Threat Intel Ingestion Pipeline")
     for feed_url in FEEDS:
-        print(f"📡 Parsing feed: {feed_url}")
+        print(f"Parsing feed: {feed_url}")
         feed = feedparser.parse(feed_url)
         
-        # Limit to top 5 articles for demonstration
-        for entry in feed.entries[:5]:
+        # Limit to top 20 articles
+        for entry in feed.entries[:20]:
             title = entry.title
             summary = entry.get("summary", "")
             text_to_analyze = f"Title: {title}\n\nSummary: {summary}"
             
-            print(f"🧠 Analyzing: {title}")
+            print(f"Analyzing: {title}")
             try:
                 graph_data = extract_threat_intel(text_to_analyze)
                 print(f"   => Found {len(graph_data.entities)} entities and {len(graph_data.relationships)} relationships.")
                 insert_into_neo4j(graph_data)
             except Exception as e:
-                print(f"   ❌ Error extracting/inserting intel: {e}")
+                print(f"   Error extracting/inserting intel: {e}")
+            
+            time.sleep(4) # Pause to respect free tier rate limits
 
-    print("✅ Ingestion complete.")
+    print("Ingestion complete.")
     neo4j_driver.close()
 
 if __name__ == "__main__":
