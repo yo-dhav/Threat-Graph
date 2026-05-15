@@ -19,7 +19,7 @@ app.get("/graph", async (req, res) => {
   try {
     const result = await session.run(`
       MATCH (n)-[r]->(m)
-      RETURN n, r, m LIMIT 200
+      RETURN n, r, m LIMIT 1500
     `);
 
     const data = result.records.map(record => {

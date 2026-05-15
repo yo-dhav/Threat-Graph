@@ -1,673 +1,474 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import styled from "styled-components";
+import * as d3 from 'd3-force';
+import styled, { keyframes } from "styled-components";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { LayoutDashboard, Network, ShieldAlert, Bug, Cpu, Activity, Eye, EyeOff } from 'lucide-react';
 
-// Styled Components
-const AppContainer = styled.div`
-  height: 100vh;
-  color: white;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  position: relative;
-  background-color: #00030a;
+/* ── Animations ── */
+const pulse = keyframes`0%,100%{opacity:0.6}50%{opacity:1}`;
+const slideUp = keyframes`from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}`;
+const shimmer = keyframes`0%{background-position:-200% 0}100%{background-position:200% 0}`;
+const rotateSlow = keyframes`from{transform:rotate(0deg)}to{transform:rotate(360deg)}`;
+const rotateReverse = keyframes`from{transform:rotate(360deg)}to{transform:rotate(0deg)}`;
+
+/* ── Layout ── */
+const Shell = styled.div`
+  display:flex; height:100vh; overflow:hidden;
+  background:#060a10;
+  background-image:
+    radial-gradient(ellipse at 10% 40%, rgba(0,255,213,0.03), transparent 50%),
+    radial-gradient(ellipse at 90% 20%, rgba(138,43,226,0.03), transparent 50%);
+  font-family:'Inter',sans-serif; color:#fff;
 `;
 
-const SpaceVoid = styled.div`
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #030508;
-  z-index: 0;
-  overflow: hidden;
-`;
 
-const Starfield = styled.div`
-  position: absolute;
-  width: 200vw;
-  height: 200vh;
-  top: -50vh;
-  left: -50vw;
-  background-image: 
-    radial-gradient(1px 1px at 20px 30px, #eee, rgba(0,0,0,0)),
-    radial-gradient(1px 1px at 40px 70px, #fff, rgba(0,0,0,0)),
-    radial-gradient(1px 1px at 50px 160px, #ddd, rgba(0,0,0,0)),
-    radial-gradient(1.5px 1.5px at 90px 40px, #fff, rgba(0,0,0,0)),
-    radial-gradient(1.5px 1.5px at 130px 80px, #fff, rgba(0,0,0,0)),
-    radial-gradient(2px 2px at 160px 120px, #ddd, rgba(0,0,0,0));
-  background-repeat: repeat;
-  background-size: 200px 200px;
-  animation: rotateStars 300s linear infinite;
-  opacity: 0.6;
-  pointer-events: none;
-  z-index: 0;
-
-  @keyframes rotateStars {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+/* Star generator — spread across entire map, varied sizes */
+const mkStars = (n, minSz, maxSz) => {
+  const s = [];
+  for(let i=0;i<n;i++){
+    const sz = (minSz + Math.random()*(maxSz-minSz)).toFixed(1);
+    const op = (0.2 + Math.random()*0.6).toFixed(2);
+    s.push(`${Math.floor(Math.random()*3000-1500)}px ${Math.floor(Math.random()*1500-750)}px ${sz}px rgba(255,255,255,${op})`);
   }
-`;
-
-const MouseGlow = styled.div`
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: radial-gradient(
-    600px circle at ${props => props.x}px ${props => props.y}px,
-    rgba(0, 255, 213, 0.07),
-    transparent 40%
-  );
-  z-index: 2;
-  pointer-events: none;
-`;
-
-const CometContainer = styled.div`
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  overflow: hidden;
-  z-index: 1;
-  pointer-events: none;
-`;
-
-const CyberComet = styled.div`
-  position: absolute;
-  width: 150px;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(0, 255, 213, 0.8), #fff);
-  box-shadow: 0 0 15px rgba(0, 255, 213, 0.8);
-  border-radius: 50%;
-  animation: cometPath 8s linear infinite;
-  opacity: 0;
-
-  @keyframes cometPath {
-    0% { transform: translate(-10vw, -10vh) rotate(45deg); opacity: 0; }
-    5% { opacity: 1; }
-    15% { transform: translate(110vw, 110vh) rotate(45deg); opacity: 0; }
-    100% { transform: translate(110vw, 110vh) rotate(45deg); opacity: 0; }
-  }
-
-  &.comet-2 {
-    animation-delay: 3s;
-    background: linear-gradient(90deg, transparent, rgba(255, 0, 85, 0.8), #fff);
-    box-shadow: 0 0 15px rgba(255, 0, 85, 0.8);
-    top: 30%;
-    left: -20%;
-  }
-
-  &.comet-3 {
-    animation-delay: 5s;
-    top: -20%;
-    left: 40%;
-  }
-`;
-
-const TopBar = styled.div`
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding: 20px 40px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  z-index: 10;
-  background: rgba(13, 25, 48, 0.5);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-`;
-
-const TitleBox = styled.div`
-  display: flex;
-  flex-direction: column;
-`;
-
-const Title = styled.h2`
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: #ffffff;
-`;
-
-const Subtitle = styled.p`
-  margin: 5px 0 0;
-  color: #00ffd5;
-  font-size: 0.9rem;
-  font-weight: 500;
-`;
-
-const SearchInput = styled.input`
-  padding: 12px 20px;
-  border-radius: 30px;
-  border: 1px solid rgba(0, 255, 213, 0.3);
-  background: rgba(0, 5, 17, 0.6);
-  color: white;
-  width: 320px;
-  outline: none;
-  transition: all 0.3s ease;
-  backdrop-filter: blur(5px);
-  font-size: 0.95rem;
-  
-  &:focus {
-    border-color: #00ffd5;
-    box-shadow: 0 0 15px rgba(0, 255, 213, 0.2);
-  }
-
-  &::placeholder {
-    color: #4a5b78;
-  }
-`;
-
-const DetailsPanel = styled.div`
-  position: absolute;
-  right: 40px;
-  top: 100px;
-  width: 380px;
-  max-height: 80vh;
-  overflow-y: auto;
-  background: rgba(13, 25, 48, 0.7);
-  padding: 30px;
-  border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(16px);
-  z-index: 10;
-  animation: slideIn 0.3s ease-out forwards;
-
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateX(20px); }
-    to { opacity: 1; transform: translateX(0); }
-  }
-
-  /* Custom Scrollbar */
-  &::-webkit-scrollbar {
-    width: 6px;
-  }
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(0, 255, 213, 0.3);
-    border-radius: 10px;
-  }
-`;
-
-const CloseButton = styled.button`
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: white;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-size: 1.2rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.15);
-    color: #ff6b00;
-    border-color: #ff6b00;
-  }
-`;
-
-const LegendPanel = styled.div`
-  position: absolute;
-  left: 40px;
-  bottom: 40px;
-  background: rgba(13, 25, 48, 0.7);
-  backdrop-filter: blur(16px);
-  padding: 20px 25px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  z-index: 10;
-`;
-
-const LegendTitle = styled.h4`
-  margin: 0 0 5px 0;
-  color: #fff;
-  font-size: 0.95rem;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-  padding-bottom: 8px;
-`;
-
-const LegendItem = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.85rem;
-  color: #d0d0d0;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 8px;
-  transition: background 0.2s;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.05);
-  }
-`;
-
-const Tooltip = styled.div`
-  position: absolute;
-  left: 280px;
-  bottom: 40px;
-  width: 260px;
-  background: rgba(13, 25, 48, 0.95);
-  padding: 15px 20px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 255, 213, 0.3);
-  box-shadow: 0 5px 25px rgba(0,0,0,0.6), 0 0 15px rgba(0, 255, 213, 0.1);
-  backdrop-filter: blur(10px);
-  color: #fff;
-  font-size: 0.85rem;
-  line-height: 1.6;
-  z-index: 20;
-  pointer-events: none;
-  animation: fadeIn 0.2s ease-out;
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateX(-10px); }
-    to { opacity: 1; transform: translateX(0); }
-  }
-
-  h5 {
-    margin: 0 0 8px 0;
-    color: #00ffd5;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-`;
-
-const LegendColor = styled.div`
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: ${props => props.color};
-  box-shadow: 0 0 10px ${props => props.color};
-`;
-
-const NodeTitle = styled.h3`
-  margin: 0 0 15px 0;
-  font-size: 1.4rem;
-  color: #fff;
-  line-height: 1.3;
-`;
-
-const Tag = styled.span`
-  display: inline-block;
-  padding: 6px 14px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  border: 1px solid ${(props) => props.color};
-  color: ${(props) => props.color};
-  background: ${(props) => `${props.color}15`};
-  margin-right: 10px;
-  margin-bottom: 20px;
-`;
-
-const DescriptionTitle = styled.h4`
-  color: #fff;
-  font-size: 0.9rem;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-  padding-bottom: 8px;
-`;
-
-const Description = styled.p`
-  color: #a0a0a0;
-  line-height: 1.6;
-  font-size: 0.95rem;
-  margin: 0 0 20px 0;
-`;
-
-// Helper for colors
-const getNodeColor = (group) => {
-  switch (group) {
-    case "Critical": return "#ff2a2a"; // Red
-    case "High": return "#ff6b00"; // Orange
-    case "Medium": return "#ffbf00"; // Amber
-    case "Low": return "#39ff14"; // Green
-    case "software": 
-    case "Software": return "#8a2be2"; // Purple
-    case "ThreatActor": return "#ff0055"; // Pink/Red
-    case "Malware": return "#39ff14"; // Neon Green
-    case "CVE": return "#00ffd5"; // Teal
-    default: return "#ffffff"; // White
-  }
+  return s.join(',');
 };
+const s1=mkStars(500,0.2,0.6), s2=mkStars(200,0.5,1.0), s3=mkStars(50,0.8,1.4);
 
-function App() {
-  const [graphData, setGraphData] = useState({ nodes: [], links: [] });
-  const [selected, setSelected] = useState(null);
-  const [hoverNode, setHoverNode] = useState(null);
-  const [search, setSearch] = useState("");
-  const [cursorPos, setCursorPos] = useState({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-  const [hoverLegend, setHoverLegend] = useState(null);
+const StarField = styled.div`
+  position:absolute; top:50%; left:50%; width:2px; height:2px;
+  pointer-events:none; z-index:0;
+`;
+const SF1 = styled(StarField)`box-shadow:${s1};animation:${rotateSlow} 400s linear infinite;`;
+const SF2 = styled(StarField)`box-shadow:${s2};animation:${rotateReverse} 280s linear infinite;`;
+const SF3 = styled(StarField)`box-shadow:${s3};animation:${rotateSlow} 180s linear infinite;`;
 
-  const fgRef = useRef();
+const NebulaBg = styled.div`
+  position:absolute; inset:0; pointer-events:none; z-index:0;
+  background:
+    radial-gradient(ellipse at 25% 45%, rgba(20,60,120,0.3), transparent 55%),
+    radial-gradient(ellipse at 75% 30%, rgba(80,20,100,0.2), transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(10,60,50,0.2), transparent 45%);
+`;
 
-  useEffect(() => {
-    const handleMouseMove = (e) => setCursorPos({ x: e.clientX, y: e.clientY });
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
+const Sidebar = styled.nav`
+  width:72px; flex-shrink:0;
+  background:rgba(8,12,18,0.97);
+  border-right:1px solid rgba(0,255,213,0.12);
+  display:flex; flex-direction:column; align-items:center;
+  padding:24px 0; gap:32px; z-index:50;
+`;
 
-  useEffect(() => {
-    fetch("http://localhost:4000/graph")
-      .then((res) => res.json())
-      .then((data) => {
-        const nodeSet = new Set();
-        const nodes = [];
-        const links = [];
+const Logo = styled.div`
+  font-size:1.4rem; font-weight:900; color:#00ffd5;
+  text-shadow:0 0 20px rgba(0,255,213,0.4);
+  letter-spacing:-1px; margin-bottom:8px;
+`;
 
-        data.forEach((d) => {
-          // Process source
-          if (d.source && d.source.id && !nodeSet.has(d.source.id)) {
-            let srcGroup = d.source.label;
-            if (srcGroup === "CVE" && d.source.severity) {
-              srcGroup = d.source.severity; // Map to Critical, High, Medium, Low
-            } else if (!srcGroup) {
-              srcGroup = "Unknown";
-            }
-            
-            nodes.push({
-              id: d.source.id,
-              group: srcGroup,
-              description: d.source.description || "No description",
-              score: d.source.cvssScore || 0,
-              neighbors: []
-            });
-            nodeSet.add(d.source.id);
-          }
+const NavBtn = styled.button`
+  all:unset; cursor:pointer; padding:10px; border-radius:12px;
+  color:${p=>p.$active?'#00ffd5':'#3a4a60'}; transition:all .25s;
+  background:${p=>p.$active?'rgba(0,255,213,0.08)':'transparent'};
+  &:hover{color:#00ffd5;background:rgba(0,255,213,0.06);transform:scale(1.1)}
+`;
 
-          // Process target
-          if (d.target && d.target.id && !nodeSet.has(d.target.id)) {
-            let tgtGroup = d.target.label;
-            if (tgtGroup === "CVE" && d.target.severity) {
-              tgtGroup = d.target.severity; // Map to Critical, High, Medium, Low
-            } else if (!tgtGroup) {
-              tgtGroup = "Unknown";
-            }
+const Main = styled.main`
+  flex:1; overflow-y:auto; padding:28px 32px;
+  display:flex; flex-direction:column; gap:20px;
+  position:relative; z-index:1;
+`;
 
-            nodes.push({
-              id: d.target.id,
-              group: tgtGroup,
-              description: d.target.description || "No description",
-              score: d.target.cvssScore || 0,
-              neighbors: []
-            });
-            nodeSet.add(d.target.id);
-          }
+const Header = styled.header`
+  display:flex; justify-content:space-between; align-items:flex-end;
+  animation:${slideUp} .5s ease-out;
+`;
 
-          if (d.source && d.target) {
-            links.push({
-              source: d.source.id,
-              target: d.target.id,
-              type: d.relationship
-            });
+const TitleGroup = styled.div``;
+const H1 = styled.h1`
+  font-size:1.6rem; font-weight:800; margin:0;
+  background:linear-gradient(135deg,#fff 30%,#00ffd5);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+`;
+const Sub = styled.p`
+  font-size:.82rem; color:#506880; margin:4px 0 0; font-weight:500;
+`;
+
+const StatusPill = styled.div`
+  display:flex; align-items:center; gap:8px;
+  background:rgba(0,255,213,0.06); border:1px solid rgba(0,255,213,0.15);
+  padding:8px 16px; border-radius:40px; font-size:.78rem; color:#00ffd5; font-weight:600;
+  & span{width:8px;height:8px;border-radius:50%;background:#00ffd5;animation:${pulse} 2s infinite}
+`;
+
+/* ── Grid ── */
+const MetricsRow = styled.div`
+  display:grid; grid-template-columns:repeat(4,1fr); gap:16px;
+  animation:${slideUp} .6s ease-out;
+`;
+
+const ChartsRow = styled.div`
+  display:grid; grid-template-columns:2fr 1fr 1.2fr; gap:16px;
+  animation:${slideUp} .7s ease-out;
+  max-height:280px;
+`;
+
+/* ── Card ── */
+const Card = styled.div`
+  background:linear-gradient(160deg,rgba(14,20,30,0.85),rgba(8,12,18,0.95));
+  border:1px solid rgba(255,255,255,0.06);
+  border-radius:16px; padding:20px; position:relative; overflow:hidden;
+  backdrop-filter:blur(16px);
+  box-shadow:0 4px 24px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.04);
+  transition:all .3s cubic-bezier(.25,.8,.25,1);
+  &::before{
+    content:'';position:absolute;top:0;left:0;right:0;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(0,255,213,0.4),transparent);
+    opacity:0;transition:opacity .3s;
+  }
+  &:hover{border-color:rgba(0,255,213,0.2);transform:translateY(-2px);
+    box-shadow:0 8px 32px rgba(0,255,213,0.08),inset 0 1px 0 rgba(255,255,255,0.04)}
+  &:hover::before{opacity:1}
+`;
+
+const MetricCard = styled(Card)`
+  display:flex; flex-direction:column; gap:12px; min-height:0;
+`;
+
+const CLabel = styled.div`
+  font-size:.78rem; color:#506880; font-weight:600; text-transform:uppercase;
+  letter-spacing:.8px; display:flex; align-items:center; gap:8px;
+`;
+
+const CValue = styled.div`
+  font-size:2.2rem; font-weight:800; letter-spacing:-1px;
+  color:${p=>p.$c||'#fff'};
+  font-family:'JetBrains Mono','Inter',monospace;
+`;
+
+const CTag = styled.span`
+  font-size:.7rem; padding:3px 8px; border-radius:6px; font-weight:600;
+  background:${p=>p.$up?'rgba(0,255,100,0.1)':'rgba(255,50,50,0.1)'};
+  color:${p=>p.$up?'#39ff14':'#ff4444'};
+`;
+
+const SectionTitle = styled.h3`
+  font-size:.9rem; color:#7a8a9e; margin:0 0 16px; font-weight:600;
+  display:flex; align-items:center; gap:8px;
+`;
+
+/* ── List ── */
+const CritList = styled.div`
+  display:flex; flex-direction:column; gap:8px; flex:1;
+  overflow-y:auto; padding-right:6px;
+  &::-webkit-scrollbar{width:3px}
+  &::-webkit-scrollbar-thumb{background:rgba(0,255,213,0.15);border-radius:3px}
+`;
+
+const CritItem = styled.div`
+  display:flex; justify-content:space-between; align-items:center;
+  padding:10px 14px; border-radius:10px;
+  background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.04);
+  transition:all .2s;
+  &:hover{background:rgba(0,255,213,0.04);border-color:rgba(0,255,213,0.2)}
+`;
+
+const RankBadge = styled.span`
+  width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  font-size:.65rem;font-weight:700;flex-shrink:0;
+  background:${p=>p.$i<3?'rgba(255,0,85,0.15)':'rgba(255,255,255,0.05)'};
+  color:${p=>p.$i<3?'#ff0055':'#506880'};
+`;
+
+/* ── Map ── */
+const MapCard = styled(Card)`
+  padding:0; display:flex; flex-direction:column;
+  border-color:rgba(0,255,213,0.15); animation:${slideUp} .8s ease-out;
+  flex-shrink:0;
+`;
+
+const MapHeader = styled.div`
+  padding:14px 20px; display:flex; justify-content:space-between; align-items:center;
+  border-bottom:1px solid rgba(255,255,255,0.05); background:rgba(0,0,0,0.2);
+  flex-shrink:0;
+`;
+
+const MapWrap = styled.div`
+  height:500px; position:relative;
+  overflow:hidden;
+  background:#000;
+`;
+
+const ToggleBtn = styled.button`
+  all:unset; cursor:pointer; display:flex; align-items:center; gap:6px;
+  font-size:.75rem; color:#506880; font-weight:500; transition:color .2s;
+  &:hover{color:#00ffd5}
+`;
+
+/* ── Helpers ── */
+const getColor = g => {
+  const m = {
+    Critical:'#ff3b3b', High:'#ff8c00', Medium:'#ffd000', Low:'#00c9a7',
+    software:'#4cc9f0', Software:'#4cc9f0',
+    ThreatActor:'#ff6b35', Malware:'#00d4aa',
+    CVE:'#4dabf7'
+  };
+  return m[g]||'#6b7280';
+};
+const PIE_C = ['#ff6b35','#00d4aa','#4cc9f0','#4dabf7'];
+
+const CustomTooltipStyle = {backgroundColor:'#0c1420',border:'1px solid rgba(0,255,213,0.3)',borderRadius:'10px',fontSize:'.8rem',color:'#e0e0e0'};
+
+/* ══════════ APP ══════════ */
+function App(){
+  const [gd,setGd]=useState({nodes:[],links:[]});
+  const [stats,setStats]=useState({actors:[],types:[],crit:[]});
+  const [sel,setSel]=useState(null);
+  const [hov,setHov]=useState(null);
+  const [mapOpen,setMapOpen]=useState(true);
+  const fg=useRef();
+
+  useEffect(()=>{
+    fetch("http://localhost:4000/graph").then(r=>r.json()).then(data=>{
+      const ns=new Set(), nodes=[], links=[];
+      data.forEach(d=>{
+        [d.source,d.target].forEach(e=>{
+          if(e&&e.id&&!ns.has(e.id)){
+            let g=e.label;
+            if(g==='CVE'&&e.severity) g=e.severity;
+            if(!g) g='Unknown';
+            nodes.push({id:e.id,group:g,neighbors:[]});
+            ns.add(e.id);
           }
         });
+        if(d.source&&d.target) links.push({source:d.source.id,target:d.target.id,type:d.relationship});
+      });
 
-        // Precompute neighbors
-        links.forEach(link => {
-          const a = nodes.find(n => n.id === link.source);
-          const b = nodes.find(n => n.id === link.target);
-          if (a && b) {
-            a.neighbors.push(b.id);
-            b.neighbors.push(a.id);
-          }
-        });
+      links.forEach(l=>{
+        const a=nodes.find(n=>n.id===l.source),b=nodes.find(n=>n.id===l.target);
+        if(a&&b){if(!a.neighbors.includes(b.id))a.neighbors.push(b.id);if(!b.neighbors.includes(a.id))b.neighbors.push(a.id)}
+      });
 
-        setGraphData({ nodes, links });
-      })
-      .catch((err) => console.error("Fetch error:", err));
-  }, []);
+      const cn=nodes.filter(n=>n.neighbors.length>0&&n.id.length<45&&!n.id.includes('<')&&!n.id.includes('>'));
+      const ids=new Set(cn.map(n=>n.id));
+      const vl=links.filter(l=>ids.has(l.source)&&ids.has(l.target));
 
-  // Filter logic
-  const filteredNodes = useMemo(() => {
-    return graphData.nodes.filter((n) =>
-      n.id.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [graphData, search]);
+      cn.forEach(n=>{
+        let b=n.group==='ThreatActor'?8:n.group==='Malware'?6:4;
+        n.val=Math.min(b+n.neighbors.length*1.5,25);
+      });
 
-  const filteredLinks = useMemo(() => {
-    return graphData.links.filter(
-      (link) =>
-        filteredNodes.find((n) => n.id === (link.source.id || link.source)) &&
-        filteredNodes.find((n) => n.id === (link.target.id || link.target))
-    );
-  }, [filteredNodes, graphData.links]);
+      setGd({nodes:cn,links:vl});
 
-  const finalGraphData = useMemo(() => ({
-    nodes: filteredNodes,
-    links: filteredLinks
-  }), [filteredNodes, filteredLinks]);
+      const actors=cn.filter(n=>n.group==='ThreatActor').sort((a,b)=>b.neighbors.length-a.neighbors.length).slice(0,6);
+      const mc=cn.filter(n=>n.group==='Malware').length;
+      const sc=cn.filter(n=>n.group==='Software'||n.group==='software').length;
+      const ac=cn.filter(n=>n.group==='ThreatActor').length;
+      const cc=cn.filter(n=>['CVE','Critical','High','Medium','Low'].includes(n.group)).length;
 
-  useEffect(() => {
-    if (fgRef.current) {
-      // Almost default repulsion. Nodes will touch but not completely overlap.
-      fgRef.current.d3Force('charge').strength(-40);
-      
-      // Default link distance.
-      fgRef.current.d3Force('link').distance(30);
-      
-      // Pulls disconnected clusters closer together into the middle.
-      fgRef.current.d3Force('center').strength(0.08);
-      
-      fgRef.current.d3ReheatSimulation();
+      setStats({
+        actors:actors.map(a=>({name:a.id.length>12?a.id.substring(0,12)+'…':a.id,value:a.neighbors.length})),
+        types:[{name:'Actors',value:ac},{name:'Malware',value:mc},{name:'Software',value:sc},{name:'CVEs',value:cc}],
+        crit:cn.sort((a,b)=>b.neighbors.length-a.neighbors.length).slice(0,10)
+      });
+    }).catch(e=>console.error(e));
+  },[]);
+
+  useEffect(()=>{
+    if(fg.current){
+      fg.current.d3Force('charge').strength(-120);
+      fg.current.d3Force('link').distance(40);
+      fg.current.d3Force('center').strength(0.05);
+      const radiusMap = {ThreatActor:80, Malware:160, Software:240, software:240, Critical:60, High:100, Medium:140, Low:180};
+      fg.current.d3Force('radial', d3.forceRadial(
+        node => radiusMap[node.group] || 200, 0, 0
+      ).strength(0.3));
+      fg.current.d3ReheatSimulation();
     }
-  }, [finalGraphData]);
+  },[gd]);
 
-  const criticalCount = graphData.nodes.filter((n) => n.group === "Critical").length;
+  const nodeCanvas=useCallback((node,ctx,gs)=>{
+    let hi=false,dim=false;
+    if(sel){hi=node.id===sel.id||sel.neighbors.includes(node.id);dim=!hi}
+    else if(hov){hi=node.id===hov.id||hov.neighbors.includes(node.id);dim=!hi}
 
-  // Custom Rendering
-  const nodeCanvasObject = useCallback((node, ctx, globalScale) => {
-    const isHovered = hoverNode && hoverNode.id === node.id;
-    const isNeighbor = hoverNode && hoverNode.neighbors.includes(node.id);
-    const isDimmed = hoverNode && !isHovered && !isNeighbor;
+    const s=node.val||5, c=getColor(node.group);
+    if(dim){ctx.beginPath();ctx.arc(node.x,node.y,s*0.5,0,Math.PI*2);ctx.fillStyle='rgba(40,50,65,0.15)';ctx.fill();return}
 
-    let size = 6;
-    if (node.group === "ThreatActor") size = 12;
-    else if (node.group === "Malware") size = 10;
-    else if (node.group === "software" || node.group === "Software") size = 8;
-    
-    const color = getNodeColor(node.group);
-    
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false);
-    
-    if (isDimmed) {
-      ctx.fillStyle = "rgba(50, 50, 60, 0.3)";
-      ctx.fill();
-      return;
-    }
-
-    // Hardware-accelerated Glow (Shadow)
-    ctx.shadowBlur = isHovered ? 40 : 15;
-    ctx.shadowColor = color;
-    
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, size, 0, 2 * Math.PI, false);
-    ctx.fillStyle = color;
+    // Glow
+    ctx.shadowBlur = hi ? 40 : 15;
+    ctx.shadowColor = c;
+    ctx.beginPath(); ctx.arc(node.x,node.y, s, 0, Math.PI*2);
+    ctx.fillStyle = c;
     ctx.fill();
-    
-    // Reset shadow so labels aren't blurry
+
+    // Inner core
     ctx.shadowBlur = 0;
-    
+    ctx.beginPath(); ctx.arc(node.x,node.y, s*0.35, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fill();
+
     // Label
-    if (isHovered || node.group === 'software' || node.group === 'Software' || node.group === 'ThreatActor' || node.group === 'Malware') {
-      const label = node.id;
-      const fontSize = isHovered ? 14 / globalScale : 10 / globalScale;
-      ctx.font = `${fontSize}px Inter, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = isHovered ? '#ffffff' : '#a0a0a0';
-      ctx.shadowBlur = 0; // Remove shadow for crisp text
-      ctx.fillText(label, node.x, node.y + size + fontSize + (2/globalScale));
+    if(hi||(s>=14&&!hov&&!sel)){
+      const lb=node.id.length>22?node.id.substring(0,22)+'…':node.id;
+      const fs=hi?13/gs:10/gs;
+      ctx.font=`600 ${fs}px Inter,sans-serif`;
+      ctx.textAlign='center';ctx.textBaseline='top';
+      ctx.fillStyle=hi?'#fff':'#8a9ab0';
+      ctx.fillText(lb,node.x,node.y+s+4/gs);
     }
-  }, [hoverNode]);
+  },[hov,sel]);
 
-  const linkCanvasObject = useCallback((link, ctx) => {
-    // Force graph populates source and target with node objects after tick
-    const sourceId = link.source.id;
-    const targetId = link.target.id;
-    
-    const isHovered = hoverNode && (hoverNode.id === sourceId || hoverNode.id === targetId);
-    const isDimmed = hoverNode && !isHovered;
+  const linkCanvas=useCallback((link,ctx)=>{
+    const si=link.source.id,ti=link.target.id;
+    let hi=false,dim=false;
+    if(sel){hi=sel.id===si||sel.id===ti;dim=!hi}
+    else if(hov){hi=hov.id===si||hov.id===ti;dim=!hi}
 
-    ctx.beginPath();
-    ctx.moveTo(link.source.x, link.source.y);
-    ctx.lineTo(link.target.x, link.target.y);
-    
-    if (isDimmed) {
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-      return;
-    }
+    ctx.beginPath();ctx.moveTo(link.source.x,link.source.y);ctx.lineTo(link.target.x,link.target.y);
+    if(dim){ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=0.5;ctx.stroke();return}
+    ctx.strokeStyle=hi?'rgba(0,255,213,0.8)':'rgba(100,180,255,0.2)';
+    ctx.lineWidth=hi?2.5:1;ctx.stroke();
+  },[hov,sel]);
 
-    ctx.strokeStyle = isHovered ? "rgba(0, 255, 213, 0.8)" : "rgba(0, 255, 213, 0.2)";
-    ctx.lineWidth = isHovered ? 1.5 : 1;
-    ctx.setLineDash([3, 3]); // Dashed/Dotted
-    ctx.stroke();
-    ctx.setLineDash([]); // Reset
-  }, [hoverNode]);
+  const totalThreats=(stats.types[0]?.value||0)+(stats.types[1]?.value||0);
+  const totalCVE=stats.types[3]?.value||0;
+  const totalSW=stats.types[2]?.value||0;
 
-  return (
-    <AppContainer>
-      <SpaceVoid />
-      <Starfield />
+  return(
+    <Shell>
 
-      <MouseGlow x={cursorPos.x} y={cursorPos.y} />
-      
-      <CometContainer>
-        <CyberComet />
-        <CyberComet className="comet-2" />
-        <CyberComet className="comet-3" />
-      </CometContainer>
+      <Sidebar>
+        <Logo>TG</Logo>
+        <NavBtn $active><LayoutDashboard size={20}/></NavBtn>
+        <NavBtn><Network size={20}/></NavBtn>
+        <NavBtn><Activity size={20}/></NavBtn>
+      </Sidebar>
 
-      <TopBar>
-        <TitleBox>
-          <Title>Threat Intelligence</Title>
-          <Subtitle>Active Critical Nodes: {criticalCount}</Subtitle>
-        </TitleBox>
-        <SearchInput
-          placeholder="Search Network..."
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </TopBar>
+      <Main>
+        <Header>
+          <TitleGroup>
+            <H1>Intelligence Command</H1>
+            <Sub>Real-time Cyber Threat Landscape • Auto-updated via NLP Pipeline</Sub>
+          </TitleGroup>
+          <StatusPill><span/>LIVE — {gd.nodes.length} entities tracked</StatusPill>
+        </Header>
 
-      <ForceGraph2D
-        ref={fgRef}
-        graphData={finalGraphData}
-        nodeCanvasObject={nodeCanvasObject}
-        linkCanvasObject={linkCanvasObject}
-        backgroundColor="rgba(0,0,0,0)"
-        onNodeClick={(node) => setSelected(node)}
-        onNodeHover={(node) => setHoverNode(node)}
-      />
+        {/* ── KPI Row ── */}
+        <MetricsRow>
+          <MetricCard>
+            <CLabel><ShieldAlert size={14} color="#ff0055"/>Active Threats</CLabel>
+            <CValue $c="#ff0055">{totalThreats}</CValue>
+            <CTag>Actors + Malware</CTag>
+          </MetricCard>
+          <MetricCard>
+            <CLabel><Bug size={14} color="#00ffd5"/>Vulnerabilities</CLabel>
+            <CValue $c="#00ffd5">{totalCVE}</CValue>
+            <CTag>CVE Tracked</CTag>
+          </MetricCard>
+          <MetricCard>
+            <CLabel><Cpu size={14} color="#8a2be2"/>Target Systems</CLabel>
+            <CValue $c="#8a2be2">{totalSW}</CValue>
+            <CTag>Software Monitored</CTag>
+          </MetricCard>
+          <MetricCard>
+            <CLabel><Network size={14} color="#ffbf00"/>Connections</CLabel>
+            <CValue $c="#ffbf00">{gd.links.length}</CValue>
+            <CTag $up>Relationships</CTag>
+          </MetricCard>
+        </MetricsRow>
 
-      {selected && (
-        <DetailsPanel>
-          <CloseButton onClick={() => setSelected(null)}>×</CloseButton>
-          <NodeTitle>{selected.id}</NodeTitle>
-          
-          <Tag color={getNodeColor(selected.group)}>
-            {selected.group === "software" ? "Software" : `Severity: ${selected.group}`}
-          </Tag>
-          
-          {selected.score > 0 && (
-            <Tag color="#00ffd5">Score: {selected.score}</Tag>
-          )}
+        {/* ── Charts Row ── */}
+        <ChartsRow>
+          <Card>
+            <SectionTitle>Top Threat Actor Activity</SectionTitle>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={stats.actors} margin={{top:5,right:20,left:-10,bottom:0}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false}/>
+                <XAxis dataKey="name" stroke="#3a4a60" tick={{fill:'#7a8a9e',fontSize:11}} axisLine={false} tickLine={false}/>
+                <YAxis stroke="#3a4a60" tick={{fill:'#7a8a9e',fontSize:11}} axisLine={false} tickLine={false}/>
+                <RTooltip cursor={{fill:'rgba(0,255,213,0.03)'}} contentStyle={CustomTooltipStyle}/>
+                <Bar dataKey="value" fill="url(#barGrad)" radius={[6,6,0,0]} barSize={32}>
+                  <defs><linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#ff0055"/><stop offset="100%" stopColor="#ff006680"/>
+                  </linearGradient></defs>
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
 
-          {selected.description && selected.description !== "No description" && (
-            <>
-              <DescriptionTitle>Intelligence Report</DescriptionTitle>
-              <Description>{selected.description}</Description>
-            </>
-          )}
+          <Card>
+            <SectionTitle>Entity Breakdown</SectionTitle>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={stats.types} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={4} dataKey="value" stroke="none">
+                  {stats.types.map((_,i)=><Cell key={i} fill={PIE_C[i]}/>)}
+                </Pie>
+                <RTooltip contentStyle={CustomTooltipStyle}/>
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginTop:'8px'}}>
+              {stats.types.map((t,i)=>(
+                <div key={i} style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'.72rem',color:'#7a8a9e'}}>
+                  <span style={{width:8,height:8,borderRadius:3,background:PIE_C[i],flexShrink:0}}/>
+                  {t.name}
+                </div>
+              ))}
+            </div>
+          </Card>
 
-          {selected.neighbors && selected.neighbors.length > 0 && (
-            <>
-              <DescriptionTitle>Connected Nodes ({selected.neighbors.length})</DescriptionTitle>
-              <Description style={{ fontSize: '0.85rem' }}>
-                {selected.neighbors.join(", ")}
-              </Description>
-            </>
-          )}
-        </DetailsPanel>
-      )}
+          <Card>
+            <SectionTitle>Highest Connected Nodes</SectionTitle>
+            <CritList>
+              {stats.crit.map((n,i)=>(
+                <CritItem key={i}>
+                  <div style={{display:'flex',alignItems:'center',gap:'10px',minWidth:0}}>
+                    <RankBadge $i={i}>{i+1}</RankBadge>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:'.82rem',fontWeight:600,color:'#e0e0e0',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:'140px'}}>{n.id}</div>
+                      <div style={{fontSize:'.68rem',color:'#506880',marginTop:'2px'}}>{n.group}</div>
+                    </div>
+                  </div>
+                  <div style={{fontSize:'.8rem',fontWeight:700,color:getColor(n.group),fontFamily:'JetBrains Mono,monospace',flexShrink:0}}>{n.neighbors.length}</div>
+                </CritItem>
+              ))}
+            </CritList>
+          </Card>
+        </ChartsRow>
 
-      <LegendPanel>
-        <LegendTitle>Entity Guide</LegendTitle>
-        <LegendItem onMouseEnter={() => setHoverLegend("ThreatActor")} onMouseLeave={() => setHoverLegend(null)}>
-          <LegendColor color={getNodeColor("ThreatActor")} /> Threat Actor
-        </LegendItem>
-        <LegendItem onMouseEnter={() => setHoverLegend("Malware")} onMouseLeave={() => setHoverLegend(null)}>
-          <LegendColor color={getNodeColor("Malware")} /> Malware
-        </LegendItem>
-        <LegendItem onMouseEnter={() => setHoverLegend("Software")} onMouseLeave={() => setHoverLegend(null)}>
-          <LegendColor color={getNodeColor("Software")} /> Software / Product
-        </LegendItem>
-        
-        <LegendTitle style={{ marginTop: '10px' }}>Severity (CVE)</LegendTitle>
-        <LegendItem onMouseEnter={() => setHoverLegend("Severity")} onMouseLeave={() => setHoverLegend(null)}>
-          <LegendColor color={getNodeColor("Critical")} /> Critical
-        </LegendItem>
-        <LegendItem onMouseEnter={() => setHoverLegend("Severity")} onMouseLeave={() => setHoverLegend(null)}>
-          <LegendColor color={getNodeColor("High")} /> High
-        </LegendItem>
-        <LegendItem onMouseEnter={() => setHoverLegend("Severity")} onMouseLeave={() => setHoverLegend(null)}>
-          <LegendColor color={getNodeColor("Medium")} /> Medium
-        </LegendItem>
-        <LegendItem onMouseEnter={() => setHoverLegend("Severity")} onMouseLeave={() => setHoverLegend(null)}>
-          <LegendColor color={getNodeColor("Low")} /> Low
-        </LegendItem>
-      </LegendPanel>
-
-      {hoverLegend === "ThreatActor" && (
-        <Tooltip>
-          <h5>Threat Actor</h5>
-          Hacker groups, state-sponsored cyber teams, or cybercriminal syndicates responsible for coordinating attacks.
-        </Tooltip>
-      )}
-      {hoverLegend === "Malware" && (
-        <Tooltip>
-          <h5>Malware</h5>
-          Malicious software, ransomware, trojans, or custom tools used by Threat Actors to compromise systems.
-        </Tooltip>
-      )}
-      {hoverLegend === "Software" && (
-        <Tooltip>
-          <h5>Software / Product</h5>
-          Targeted applications, operating systems, or devices that are vulnerable to exploitation.
-        </Tooltip>
-      )}
-      {hoverLegend === "Severity" && (
-        <Tooltip>
-          <h5>CVE Severity</h5>
-          Standardized CVSS scores indicating how dangerous a vulnerability is, ranging from Low (0.0) to Critical (10.0).
-        </Tooltip>
-      )}
-    </AppContainer>
+        {/* ── Map ── */}
+        <MapCard>
+          <MapHeader>
+            <SectionTitle style={{margin:0}}>Global Threat Network</SectionTitle>
+            <div style={{display:'flex',gap:'12px',alignItems:'center'}}>
+              {sel&&<ToggleBtn onClick={()=>setSel(null)}>✕ Clear Focus</ToggleBtn>}
+              <ToggleBtn onClick={()=>setMapOpen(o=>!o)}>
+                {mapOpen?<EyeOff size={14}/>:<Eye size={14}/>}{mapOpen?'Collapse':'Expand'}
+              </ToggleBtn>
+            </div>
+          </MapHeader>
+          <MapWrap style={{display:mapOpen?'block':'none'}}>
+            {/* Space background with rotating stars */}
+            <NebulaBg/>
+            <SF1/><SF2/><SF3/>
+            <ForceGraph2D ref={fg} graphData={gd} nodeVal="val"
+              nodeCanvasObject={nodeCanvas} linkCanvasObject={linkCanvas}
+              backgroundColor="rgba(0,0,0,0)" height={500}
+              linkDirectionalParticles={2}
+              linkDirectionalParticleWidth={1.5}
+              linkDirectionalParticleSpeed={0.004}
+              linkDirectionalParticleColor={l=>{
+                const si=l.source.id||l.source, ti=l.target.id||l.target;
+                if(sel&&(sel.id===si||sel.id===ti)) return '#00ffd5';
+                return 'rgba(100,180,255,0.4)';
+              }}
+              onNodeClick={n=>setSel(n)} onNodeHover={n=>setHov(n)}
+              onBackgroundClick={()=>setSel(null)}
+              cooldownTicks={100}
+            />
+          </MapWrap>
+        </MapCard>
+      </Main>
+    </Shell>
   );
 }
 
